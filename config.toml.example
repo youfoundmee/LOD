@@ -1,0 +1,47 @@
+# Sample LOD config file
+
+[instance]
+port = 1337
+# config supports environment variable expansion
+admin_token = "${ADMIN_TOKEN}"
+
+[[proxies]]
+name = "maps"
+# dynamic endpoint via special {e} parameter accessible via
+# http://lod:1337/maps/{e}/{z}/{x}/{y}.pbf
+tile_url = "http://tegola.example.com:8080/maps/{e}/{z}/{x}/{y}.pbf"
+cors_origins = "*"
+del_headers = ["Tegola-Cache"]
+
+[[proxies.add_headers]]
+name = "Referer"
+value = "https://yoursite.com/"
+
+[[proxies.params]]
+name = "osm_id"
+default = "0"
+
+[proxies.cache]
+mem_enabled = true
+mem_cap = 200
+mem_ttl = "2h"
+redis_enabled = true
+redis_ttl = "48h"
+redis_url = "redis://localhost:6379/0"
+# dynamic endpoint name in cache key (replaces {e})
+key_template = "basemap:{e}:{z}:{x}:{y}:{osm_id}"
+
+[[proxies]]
+name = "tornadoes"
+tile_url = "http://tegola.example.com:8080/maps/tornadoes/{z}/{x}/{y}.pbf"
+cors_origins = "*"
+del_headers = ["Tegola-Cache"]
+
+[proxies.cache]
+mem_enabled = true
+mem_cap = 200
+mem_ttl = "1h"
+redis_enabled = true
+redis_ttl = "48h"
+redis_url = "redis://localhost:6379/0"
+key_template = "tornadoes:{z}:{x}:{y}"

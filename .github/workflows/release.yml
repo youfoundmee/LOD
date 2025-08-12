@@ -1,0 +1,172 @@
+name: release
+
+on:
+  release:
+    types:
+      - published
+
+jobs:
+  gen_version:
+    name: Set LOD version
+    runs-on: ubuntu-20.04
+
+    steps:
+      # on release, we want to use release.tag_name for the version
+      - name: Set LOD version (use release.tag_name)
+        if: github.event_name == 'release'
+        run: echo ${{ github.event.release.tag_name }} > ${{ github.workspace }}/version.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: version
+          path: ${{ github.workspace }}/version.txt
+
+  build_linux:
+    name: Build LOD for Linux
+    needs: gen_version
+    runs-on: ubuntu-20.04
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Download version artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: version
+
+      - name: Set LOD version
+        run: echo "VERSION=$(cat version/version.txt | sed -e 's/^v//')" >> $GITHUB_ENV
+
+      - name: Set up Go 1.19.3
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.19.3
+
+      - name: Install GEOS with apt
+        run: sudo apt update && sudo apt -y install libgeos++-dev libgeos-3.8.0 libgeos-c1v5 libgeos-dev libgeos-doc
+
+      - name: Build LOD for Linux
+        env:
+          # build architecture
+          GOOS: linux
+        run: |
+          cd cmd/lod
+          go build -mod vendor -ldflags "-w -X 'github.com/dechristopher/lod/config.Version=${VERSION}'"
+
+      # workaround for archives losing permissions
+      # https://github.com/actions/upload-artifact/issues/38
+      - name: Zip archive permissions workaround
+        run: |
+          cd cmd/lod
+          zip -9 -D lod_linux_amd64_${{ env.VERSION }}.zip lod
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: artifact_lod_linux_amd64_${{ env.VERSION }}
+          path: cmd/lod/lod_linux_amd64_${{ env.VERSION }}.zip
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: cmd/lod/lod_linux_amd64_${{ env.VERSION }}.zip
+          asset_name: lod_linux_amd64_${{ env.VERSION }}.zip
+          asset_content_type: application/zip
+
+  build_macos:
+    name: Build LOD for MacOS
+    needs: gen_version
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Download version artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: version
+
+      - name: Set LOD version
+        run: echo "VERSION=$(cat version/version.txt | sed -e 's/^v//')" >> $GITHUB_ENV
+
+      - name: Set up Go 1.19.3
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.19.3
+
+      - name: Install GEOS with Homebrew
+        run: brew install geos
+
+      - name: Build for Darwin
+        env:
+          GOOS: darwin
+        run: |
+          cd cmd/lod
+          go build -mod vendor -ldflags "-w -X 'github.com/dechristopher/lod/config.Version=${VERSION}'"
+
+      # workaround for archives losing permissions
+      # https://github.com/actions/upload-artifact/issues/38
+      - name: Zip archive permissions workaround
+        run: |
+          cd cmd/lod
+          zip -9 -D lod_darwin_amd64_${{ env.VERSION }}.zip lod
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: artifact_lod_darwin_amd64_${{ env.VERSION }}
+          path: cmd/lod/lod_darwin_amd64_${{ env.VERSION }}.zip
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: cmd/lod/lod_darwin_amd64_${{ env.VERSION }}.zip
+          asset_name: lod_darwin_amd64_${{ env.VERSION }}.zip
+          asset_content_type: application/zip
+
+  build_docker:
+    name: Build and Publish LOD Docker Image
+    needs: gen_version
+    runs-on: ubuntu-20.04
+    env:
+      DH_ORG: dechristopher
+      DH_REPO: lod
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Download version artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: version
+
+      - name: Set LOD version
+        run: echo "VERSION=$(cat version/version.txt | sed -e 's/^v//')" >> $GITHUB_ENV
+
+      - name: Build and tag Docker container
+        run: |
+          docker build -t lod --build-arg VERSION=${VERSION} .
+          docker tag lod:latest ${DH_ORG}/${DH_REPO}:${VERSION}
+          docker tag lod:latest ${DH_ORG}/${DH_REPO}:latest
+
+#      - name: Publish Docker container
+#        if: github.event_name == 'release'
+#        env:
+#          DH_USER: ${{ secrets.DH_USER }}
+#          DH_PASSWORD: ${{ secrets.DH_PASSWORD }}
+#        run: |
+#          echo ${DH_PASSWORD} | docker login -u ${DH_USER} --password-stdin
+#          docker push ${DH_ORG}/${DH_REPO}:${VERSION}
+#          docker push ${DH_ORG}/${DH_REPO}:latest
